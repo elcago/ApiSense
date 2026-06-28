@@ -57,6 +57,14 @@ Computes Integrated Gradients attribution scores across the 15-day exposure wind
 
 ---
 
+## Data
+
+The bee detection training data (1,352 annotated hive entrance frames) is available on Kaggle: https://www.kaggle.com/datasets/rowlettheowlet/bee-detection-from-video-frames
+
+The processed feature dataset (`data/ApiSense_v17.csv`) contains 34,560 records across 32 colonies and 15 days and is included in this repository.
+
+---
+
 ## Installation
 
 ```bash
