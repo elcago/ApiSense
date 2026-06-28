@@ -20,13 +20,14 @@ Detects bees at the hive entrance with a fine-tuned YOLOv8s model (94.8% precisi
 
 Extracts six foraging features capturing activity levels, trip timing, and homing failure rate, and eight acoustic features capturing wingbeat frequency stability, spectral structure, and energy.
 
-**3. WAM-Net** — `wam_net.py`
-
-Predicts bifenthrin exposure using three stages: modality-specific self-attention encoders to capture cumulative behavioral changes over time, a weather-gating mechanism to separate pesticide-driven changes from weather-driven ones, and bidirectional cross-modal attention to jointly model foraging and acoustic signals.
-
-**4. Training** — `train.py`
+**3. Training** — `train.py`
 
 Trains with leave-one-out cross-validation across all 32 colonies, averaged over 10 random seeds.
+
+
+**4. Inference** — `inference.py`
+
+Predicts bifenthrin exposure using three stages: modality-specific self-attention encoders to capture cumulative behavioral changes over time, a weather-gating mechanism to separate pesticide-driven changes from weather-driven ones, and bidirectional cross-modal attention to jointly model foraging and acoustic signals.
 
 **5. Ablation Study** — `ablation.py`
 
