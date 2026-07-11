@@ -64,7 +64,7 @@ Computes integrated gradients (IG) attribution scores for each feature throughou
 
 The bee detection training data is available on Kaggle: https://www.kaggle.com/datasets/rowlettheowlet/bee-detection-from-video-frames
 
-The processed feature dataset contains 25,920 records across 24 colonies and 15 days and is included in this repository.
+The processed feature dataset is included in this repository.
 
 ---
 
