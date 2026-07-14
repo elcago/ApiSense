@@ -1,3 +1,4 @@
+import gc
 import numpy as np
 import pandas as pd
 import torch
@@ -8,8 +9,10 @@ from sklearn.ensemble import RandomForestClassifier
 from sklearn.preprocessing import StandardScaler
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
 from xgboost import XGBClassifier
-from train import build_sequences, FORAGING_COLS, ACOUSTIC_COLS, WEATHER_COLS, LABEL_COL
-from train import LR, BATCH_SIZE, N_EPOCHS, PATIENCE, N_SEEDS
+from train import build_sequences, FORAGING_COLS, ACOUSTIC_COLS, WEATHER_COLS, LABEL_COL, SORT_COLS, fit_scalers
+from train import LR, BATCH_SIZE, N_EPOCHS, PATIENCE, N_SEEDS, VAL_FRACTION
+
+torch.set_num_threads(1)
 
 
 DATA_CSV = "data/ApiSense_v17.csv"
@@ -89,9 +92,17 @@ SKLEARN_MODELS = {
 }
 
 
-def build_flat_sequence(df, colony_id):
-    colony = df[df["colony_id"] == colony_id].sort_values("interval_start")
-    x = torch.tensor(colony[ALL_FEATURE_COLS].fillna(0).values, dtype=torch.float32)
+def build_flat_sequence(df, colony_id, scalers=None):
+    colony = df[df["colony_id"] == colony_id].sort_values(SORT_COLS)
+
+    if scalers is not None:
+        foraging = scalers["foraging"].transform(colony[FORAGING_COLS].fillna(0).values)
+        acoustic = scalers["acoustic"].transform(colony[ACOUSTIC_COLS].fillna(0).values)
+        weather = scalers["weather"].transform(colony[WEATHER_COLS].fillna(0).values)
+        x = torch.tensor(np.concatenate([foraging, acoustic, weather], axis=1), dtype=torch.float32)
+    else:
+        x = torch.tensor(colony[ALL_FEATURE_COLS].fillna(0).values, dtype=torch.float32)
+
     label = int(colony[LABEL_COL].iloc[0])
     return x, label
 
@@ -104,7 +115,15 @@ def collate_flat(batch):
 
 def train_sequential_fold(model_cls, train_data, test_sample, device, seed=42):
     torch.manual_seed(seed)
-    train_loader = DataLoader(train_data, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_flat)
+
+    n_val = max(1, int(len(train_data) * VAL_FRACTION))
+    rng = np.random.RandomState(seed)
+    val_idx = set(rng.choice(len(train_data), size=n_val, replace=False))
+    fit_data = [x for i, x in enumerate(train_data) if i not in val_idx]
+    val_data = [x for i, x in enumerate(train_data) if i in val_idx]
+
+    train_loader = DataLoader(fit_data, batch_size=BATCH_SIZE, shuffle=True, collate_fn=collate_flat)
+    val_loader = DataLoader(val_data, batch_size=BATCH_SIZE, shuffle=False, collate_fn=collate_flat)
 
     model = model_cls().to(device)
     optimizer = torch.optim.AdamW(model.parameters(), lr=LR)
@@ -125,7 +144,7 @@ def train_sequential_fold(model_cls, train_data, test_sample, device, seed=42):
         model.eval()
         val_loss = 0.0
         with torch.no_grad():
-            for x, labels in train_loader:
+            for x, labels in val_loader:
                 x, labels = x.to(device), labels.to(device)
                 val_loss += criterion(model(x), labels).item()
 
@@ -144,7 +163,12 @@ def train_sequential_fold(model_cls, train_data, test_sample, device, seed=42):
     x_test, label = test_sample
     with torch.no_grad():
         p = model(x_test.unsqueeze(0).to(device)).item()
-    return int(p > 0.5), label
+    pred = int(p > 0.5)
+
+    del model, optimizer, train_loader, val_loader, best_state
+    gc.collect()
+
+    return pred, label
 
 
 if __name__ == "__main__":
@@ -162,12 +186,15 @@ if __name__ == "__main__":
 
         for test_id in colony_ids:
             train_ids = [c for c in colony_ids if c != test_id]
-            train_data = [build_flat_sequence(df, cid) for cid in train_ids]
-            test_sample = build_flat_sequence(df, test_id)
+            scalers = fit_scalers(df, train_ids)
+            train_data = [build_flat_sequence(df, cid, scalers) for cid in train_ids]
+            test_sample = build_flat_sequence(df, test_id, scalers)
 
             votes = [train_sequential_fold(model_cls, train_data, test_sample, device, seed=s)[0] for s in range(N_SEEDS)]
             all_preds.append(int(np.round(np.mean(votes))))
             all_labels.append(test_sample[1])
+            del train_data, test_sample
+            gc.collect()
 
         result = {
             "model": model_name,
