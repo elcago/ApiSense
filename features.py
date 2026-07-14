@@ -23,19 +23,18 @@ N_HARMONICS = 7
 
 def compute_foraging_features(counts_df):
     counts_df = counts_df.copy()
-    counts_df["interval_start"] = pd.to_datetime(counts_df["interval_start"])
-    counts_df["date"] = counts_df["interval_start"].dt.date
+    counts_df["time_h"] = counts_df["hour"] + counts_df["minute"] / 60
 
     records = []
 
     for (colony_id, date), day_df in counts_df.groupby(["colony_id", "date"]):
-        day_df = day_df.sort_values("interval_start")
+        day_df = day_df.sort_values(["hour", "minute"])
 
-        first_departure = day_df.loc[day_df["exit"] > 0, "interval_start"].min()
-        last_return = day_df.loc[day_df["entrance"] > 0, "interval_start"].max()
+        first_departure = day_df.loc[day_df["exit"] > 0, "time_h"].min()
+        last_return = day_df.loc[day_df["entrance"] > 0, "time_h"].max()
 
         trip_window = (
-            (last_return - first_departure).total_seconds() / 3600
+            last_return - first_departure
             if pd.notna(first_departure) and pd.notna(last_return)
             else np.nan
         )
@@ -50,11 +49,12 @@ def compute_foraging_features(counts_df):
             records.append({
                 "colony_id": colony_id,
                 "date": date,
-                "interval_start": row["interval_start"],
+                "hour": row["hour"],
+                "minute": row["minute"],
                 "exit_entry_ratio": exits / entrances if entrances > 0 else np.nan,
-                "mean_trip_duration": INTERVAL_SECONDS / exits if exits > 0 else np.nan,
-                "first_departure": first_departure.hour + first_departure.minute / 60 if pd.notna(first_departure) else np.nan,
-                "last_return": last_return.hour + last_return.minute / 60 if pd.notna(last_return) else np.nan,
+                "mean_flight_time": INTERVAL_SECONDS / exits if exits > 0 else np.nan,
+                "first_departure": first_departure,
+                "last_return": last_return,
                 "trip_window": trip_window,
                 "homing_failure_rate": homing_failure,
             })
@@ -144,7 +144,7 @@ def extract_acoustic_features(audio_path):
             "spectral_centroid": spectral_centroid,
             "spectral_bandwidth": spectral_bandwidth,
             "spectral_flux": float(np.mean(np.sum((magnitude - prev_mag) ** 2, axis=0))),
-            "rms_energy": float(np.sqrt(np.mean(segment ** 2))),
+            "RMS_Energy": float(np.sqrt(np.mean(segment ** 2))),
             "zero_crossing_rate": float(np.mean(librosa.feature.zero_crossing_rate(segment, hop_length=HOP_LENGTH))),
         })
 
@@ -159,8 +159,7 @@ if __name__ == "__main__":
     print("Extracting acoustic features...")
     acoustic_records = []
     for audio_file in sorted(Path(AUDIO_DIR).glob("*.wav")):
-        parts = audio_file.stem.split("_")
-        colony_id, date = parts[0], parts[1]
+        colony_id, date = audio_file.stem.rsplit("_", 1)
         records = extract_acoustic_features(str(audio_file))
         for r in records:
             r["colony_id"] = colony_id
