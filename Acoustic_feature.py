@@ -152,7 +152,7 @@ def extract_features(audio_path, verbose=True):
 
 def print_results(label, features, ctrl_min, ctrl_max, ctrl_mean):
     def chk(v, lo, hi):
-        return "✅" if lo <= v <= hi else "❌"
+        return "OK" if lo <= v <= hi else "FAIL"
     def pct(v, t):
         return (v - t) / t * 100
 
