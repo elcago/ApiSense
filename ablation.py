@@ -4,7 +4,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from sklearn.metrics import accuracy_score, precision_score, recall_score, f1_score
-from train import build_sequences, FORAGING_COLS, ACOUSTIC_COLS, WEATHER_COLS, LABEL_COL
+from train import build_sequences, FORAGING_COLS, ACOUSTIC_COLS, WEATHER_COLS, LABEL_COL, fit_scalers
 from train import LR, BATCH_SIZE, N_EPOCHS, PATIENCE, N_SEEDS, collate
 
 DATA_CSV = "data/ApiSense_v17.csv"
@@ -199,8 +199,9 @@ if __name__ == "__main__":
 
         for test_id in colony_ids:
             train_ids = [c for c in colony_ids if c != test_id]
-            train_data = [build_sequences(df, cid) for cid in train_ids]
-            test_colony = build_sequences(df, test_id)
+            scalers = fit_scalers(df, train_ids)
+            train_data = [build_sequences(df, cid, scalers) for cid in train_ids]
+            test_colony = build_sequences(df, test_id, scalers)
 
             seed_results = [train_fold(model_cls, train_data, test_colony, device, seed=s) for s in range(N_SEEDS)]
             votes = [r["pred"] for r in seed_results]
