@@ -18,6 +18,9 @@ MAX_AGE = 30
 MIN_HITS = 3
 IOU_THRESHOLD = 0.3
 
+INTERVAL_MINUTES = 10
+DAY_START_HOUR = 7
+
 
 def smooth_trajectory(centroids):
     frames = np.arange(len(centroids))
@@ -46,14 +49,25 @@ def classify_trajectory(centroids, line_y):
     return "pass_through"
 
 
+def interval_bucket(frame_index, fps):
+    elapsed_minutes = (frame_index / fps) / 60.0
+    total_minutes = DAY_START_HOUR * 60 + elapsed_minutes
+    bucket_start = int(total_minutes // INTERVAL_MINUTES) * INTERVAL_MINUTES
+    hour = bucket_start // 60
+    minute = bucket_start % 60
+    return hour, minute
+
+
 def process_video(video_path, detector, tracker):
     cap = cv2.VideoCapture(video_path)
     if not cap.isOpened():
         raise IOError(f"Cannot open video: {video_path}")
 
+    fps = cap.get(cv2.CAP_PROP_FPS) or 30.0
     frame_height = int(cap.get(cv2.CAP_PROP_FRAME_HEIGHT))
     line_y = frame_height * COUNTING_LINE_Y
     trajectories = {}
+    frame_index = 0
 
     while True:
         ret, frame = cap.read()
@@ -72,15 +86,24 @@ def process_video(video_path, detector, tracker):
             track_id = int(track_id)
             cx = (x1 + x2) / 2
             cy = (y1 + y2) / 2
-            trajectories.setdefault(track_id, []).append((cx, cy))
+            trajectories.setdefault(track_id, []).append((cx, cy, frame_index))
+
+        frame_index += 1
 
     cap.release()
 
-    counts = {"entrance": 0, "exit": 0, "pass_through": 0}
+    interval_counts = {}
     for centroids in trajectories.values():
-        counts[classify_trajectory(centroids, line_y)] += 1
+        label = classify_trajectory([(c[0], c[1]) for c in centroids], line_y)
+        if label == "pass_through":
+            continue
+        mid_frame = centroids[len(centroids) // 2][2]
+        hour, minute = interval_bucket(mid_frame, fps)
+        key = (hour, minute)
+        interval_counts.setdefault(key, {"entrance": 0, "exit": 0})
+        interval_counts[key][label] += 1
 
-    return counts
+    return interval_counts
 
 
 if __name__ == "__main__":
@@ -89,12 +112,25 @@ if __name__ == "__main__":
 
     rows = []
     for video_file in sorted(Path(VIDEO_DIR).glob("*.mp4")):
-        counts = process_video(str(video_file), detector, tracker)
-        rows.append({"file": video_file.name, **counts})
-        print(f"{video_file.name}: entrance={counts['entrance']}  exit={counts['exit']}")
+        colony_id, date = video_file.stem.rsplit("_", 1)
+        interval_counts = process_video(str(video_file), detector, tracker)
+
+        for (hour, minute), counts in sorted(interval_counts.items()):
+            rows.append({
+                "colony_id": colony_id,
+                "date": date,
+                "hour": hour,
+                "minute": minute,
+                "entrance": counts["entrance"],
+                "exit": counts["exit"],
+            })
+
+        total_entrance = sum(c["entrance"] for c in interval_counts.values())
+        total_exit = sum(c["exit"] for c in interval_counts.values())
+        print(f"{video_file.name}: entrance={total_entrance}  exit={total_exit}  intervals={len(interval_counts)}")
 
     with open(OUTPUT_CSV, "w", newline="") as f:
-        writer = csv.DictWriter(f, fieldnames=["file", "entrance", "exit", "pass_through"])
+        writer = csv.DictWriter(f, fieldnames=["colony_id", "date", "hour", "minute", "entrance", "exit"])
         writer.writeheader()
         writer.writerows(rows)
 
